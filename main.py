@@ -1,5 +1,7 @@
 import os
 import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from huggingface_hub import HfApi, create_repo
@@ -11,21 +13,39 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 HF_TOKEN = os.environ["HF_TOKEN"]
 HF_USERNAME = os.environ["HF_USERNAME"]
 OWNER_TELEGRAM_ID = int(os.environ.get("OWNER_TELEGRAM_ID", "0"))
-PORT = int(os.environ.get("PORT", 8080))
+PORT = int(os.environ.get("PORT", 10000))
 
 api = HfApi(token=HF_TOKEN)
+
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, *args):
+        pass
+
+
+def run_health_server():
+    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    log.info(f"Health server on port {PORT}")
+    server.serve_forever()
+
 
 def is_owner(update):
     return update.effective_user.id == OWNER_TELEGRAM_ID
 
+
 async def start(update, ctx):
     await update.message.reply_text(
-        "🤖 Host Bot Controller\n\n"
-        "/new <name> — create a hosting space\n"
-        "/list — list your spaces\n"
-        "/delete <name> — delete a space\n"
-        "/id — get your Telegram ID"
+        "Host Bot Controller\n\n"
+        "/new <name> - create a hosting space\n"
+        "/list - list your spaces\n"
+        "/delete <name> - delete a space\n"
+        "/id - get your Telegram ID"
     )
+
 
 async def new_space(update, ctx):
     if not is_owner(update):
@@ -40,6 +60,7 @@ async def new_space(update, ctx):
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
+
 async def list_spaces(update, ctx):
     if not is_owner(update):
         return await update.message.reply_text("Not authorized.")
@@ -48,10 +69,11 @@ async def list_spaces(update, ctx):
         lines = ["Your Spaces:"]
         for s in spaces:
             stage = s.runtime.stage if s.runtime else 'unknown'
-            lines.append(f"- {s.id} — {stage}")
+            lines.append(f"- {s.id} - {stage}")
         await update.message.reply_text("\n".join(lines))
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
+
 
 async def delete_space(update, ctx):
     if not is_owner(update):
@@ -65,11 +87,15 @@ async def delete_space(update, ctx):
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
+
 async def get_id(update, ctx):
     await update.message.reply_text(f"Your ID: {update.effective_user.id}")
 
+
 def main():
     log.info("Starting Host Bot...")
+    threading.Thread(target=run_health_server, daemon=True).start()
+
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", start))
@@ -78,7 +104,8 @@ def main():
     app.add_handler(CommandHandler("delete", delete_space))
     app.add_handler(CommandHandler("id", get_id))
     log.info("Bot running.")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
